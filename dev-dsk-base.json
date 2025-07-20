@@ -1,0 +1,141 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Dev-Dsk-Sending-Grounds: Stack for developer desktop. OS: AL2023, S3 backup, IAM, and additional hooks for monitoring, alarming, etc...",
+
+  "Parameters": {
+    "InstanceType": {
+      "Type": "String",
+      "Default": "t3.medium",
+      "AllowedValues": ["t3.micro", "t3.small", "t3.medium", "t3.large", "t3.xlarge"],
+      "Description": "EC2 instance size"
+    },
+    "KeyName": {
+      "Type": "AWS::EC2::KeyPair::KeyName",
+      "Default": "DEV_DSK_SENDING_GROUNDS",
+      "Description": "Name of an existing EC2 KeyPair to SSH"
+    },
+    "AllowedIp": {
+      "Type": "String",
+      "Description": "CIDR block allowd to SSH to host"
+    }
+  },
+
+  "Resources": {
+    "DevDskInstanceRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [{
+            "Effect": "Allow",
+            "Principal": { "Service": ["ec2.amazonaws.com"] },
+            "Action": "sts:AssumeRole"
+          }]
+        },
+        "ManagedPolicyArns": [
+          "arn:aws:iam::aws:policy/AmazonS3FullAccess",
+          "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+        ],
+        "RoleName": "DevDskSendingGroundsRole"
+      }
+    },
+
+    "DevDskInstanceProfile": {
+      "Type": "AWS::IAM::InstanceProfile",
+      "Properties": {
+        "Roles": [ { "Ref": "DevDskInstanceRole" } ]
+      }
+    },
+
+    "DevDskSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "Allow SSH access",
+        "SecurityGroupIngress": [{
+          "IpProtocol": "tcp",
+          "FromPort": 22,
+          "ToPort": 22,
+          "CidrIp": { "Ref": "AllowedIp" }
+        }]
+      }
+    },
+
+    "DevDskS3Bucket": {
+      "Type": "AWS::S3::Bucket",
+      "Properties": {
+        "BucketName": "dev-dsk-sending-grounds-backups",
+        "LifecycleConfiguration": {
+          "Rules": [{
+            "Id": "MoveOldBackupsToGlacier",
+            "Status": "Enabled",
+            "Prefix": "",
+            "Transitions": [{
+              "StorageClass": "GLACIER",
+              "TransitionInDays": 30
+            }]
+          }]
+        }
+      }
+    },
+
+    "DevDskLaunchTemplate": {
+      "Type": "AWS::EC2::LaunchTemplate",
+      "Properties": {
+        "LaunchTemplateName": "DevDskSendingGroundsTemplate",
+        "LaunchTemplateData": {
+          "InstanceType": { "Ref": "InstanceType" },
+          "KeyName": { "Ref": "KeyName" },
+          "IamInstanceProfile": {
+            "Arn": { "Fn::GetAtt": ["DevDskInstanceProfile", "Arn"] }
+          },
+          "ImageId": {
+            "Fn::Sub": "{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-x86_64}}"
+          },
+          "TagSpecifications": [{
+            "ResourceType": "instance",
+            "Tags": [{ "Key": "Name", "Value": "DevDskSendingGrounds" }]
+          }],
+          "UserData": {
+            "Fn::Base64": {
+              "Fn::Join": ["", [
+                "#!/bin/bash\n",
+                "echo 'Hello from Dev-Dsk base setup!' > /var/log/devdsk-init.log\n"
+              ]]
+            }
+          }
+        }
+      }
+    },
+
+    "DevDskInstance": {
+      "Type": "AWS::EC2::Instance",
+      "Properties": {
+        "LaunchTemplate": {
+          "LaunchTemplateId": { "Ref": "DevDskLaunchTemplate" },
+          "Version": { "Fn::GetAtt": ["DevDskLaunchTemplate", "LatestVersionNumber"] }
+        },
+        "SecurityGroupIds": [
+          { "Ref": "DevDskSecurityGroup" }
+        ],
+        "AvailabilityZone": {
+          "Fn::Select": [0, { "Fn::GetAZs": "" }]
+        }
+      }
+    }
+  },
+
+  "Outputs": {
+    "InstanceID": {
+      "Description": "EC2 instance ID",
+      "Value": { "Ref": "DevDskInstance" }
+    },
+    "PublicIP": {
+      "Description": "Public IP of the instance",
+      "Value": { "Fn::GetAtt": ["DevDskInstance", "PublicIp"] }
+    },
+    "S3BucketName": {
+      "Description": "S3 bucket for backups",
+      "Value": { "Ref": "DevDskS3Bucket" }
+    }
+  }
+}
