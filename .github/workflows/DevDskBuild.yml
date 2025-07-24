@@ -1,6 +1,6 @@
 # This is a basic workflow to help you get started with Actions
 
-name: DevDesk-CI
+name: Deploy to DevDesk
 
 # Controls when the workflow will run
 on:
@@ -15,7 +15,6 @@ on:
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
-  # Custom Job Name
   build:
     # Github hosted runner - TODO: Look at migrating to self-hosted - pro/cons
     runs-on: ubuntu-latest
@@ -34,3 +33,19 @@ jobs:
         run: |
           printf "[INFO] Add other actions to build\n"
           printf "[INFO] Deploy your project\n"
+  deploy: 
+      runs-on: ubuntu-latest
+      steps:
+        - name: Checkout code
+          uses: actions/checkout@v4 # Get your code from the repository
+  
+        - name: Setup SSH
+          uses: webfactory/ssh-agent@v0.9.0 # Action to set up SSH agent
+          with:
+            ssh-private-key: ${{ secrets.SSH_KEY }}
+            
+        - name: Add EC2 host to known_hosts
+          run: |
+            mkdir -p ~/.ssh
+            chmod 0700 ~/.ssh
+            printf "We did it Patrick, we saved the city\n"
